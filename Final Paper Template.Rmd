@@ -1,0 +1,503 @@
+---
+title: "Final Paper"
+author: "STOR 320.01 Group 13"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+library(modelr )
+library(tidyr)
+library(caret)
+library(pROC)
+library(pdp)
+library(irr)
+library(gridExtra)
+library(grid)
+
+library(RMySQL)
+library(DBI)
+```
+
+# INTRODUCTION
+
+In today's rapidly evolving marketplace, businesses continually seek innovative ways to understand and engage with their customers. Gaining insights into customer behavior and preferences can provide companies with a competitive edge, enabling them to tailor their marketing strategies and product offerings to better meet their target audience's needs. Specifically, companies should infer customers' purchasing habits based on their characteristics and employ suitable timing or methods to promote their products. Furthermore, businesses can leverage promotional campaigns to help maximize their profits. In this context, we present an analysis of a marketing campaign dataset to explore two intriguing questions that hold significant potential for both the owner of the data and the broader business community.
+
+With the advancement of internet technology, shopping through websites has become the preferred method for an increasing number of people. However, for certain specific products, catalog purchases and in-store purchases still account for a significant share of sales. If companies can accurately understand the number of products customers demand in each market, they can rationally allocate their sales products proportionally across various purchasing platforms. This ensures that all customer consumption demands are met and prevents the accumulation of goods in a single purchasing channel, leading to expiration and waste. Consequently, our first area of investigation focuses on uncovering the most influential product categories that drive customers to choose specific shopping methods. By examining the relationship between product types and preferred shopping channels, businesses can optimize their marketing strategies and allocate resources more effectively, ultimately driving higher sales and customer satisfaction.
+
+In addition, marketing campaigns serve as crucial tools for many businesses seeking to promote their products and services to potential customers. However, developing a successful campaign can be challenging and requires a deep understanding of customer behavior and preferences. As such, our second question aims to identify the demographical factors most strongly associated with a customer's likelihood to respond to the company's marketing campaign. By analyzing the relationship between demographic variables and campaign response, we aim to pinpoint the factors that best predict campaign success. Subsequently, we can leverage these variables to help companies identify potential target customers for each marketing campaign, tailoring aspects such as timing, location, and methods to suit the target audience better, ultimately leading to increased profits.
+
+The insights gained from studying this dataset offer valuable marketing strategies for the company providing the data and enabling other businesses with similar operating models to develop targeted strategies by gathering customer information. By doing so, they have the potential to reduce costs and increase profits through the identification and acquisition of more potential customers. This research serves to emphasize the importance of data-driven decision-making in today's competitive business landscape.
+
+
+# DATA
+
+```{r echo = TRUE}
+Customer <- read.csv("marketing_campaign.csv", sep = "\t")
+# CLEAN DATA: 
+# Remove missing values
+Customer_clean <- Customer[complete.cases(Customer), ]
+
+# Identify the numerical variables
+numerical_vars <- c("Year_Birth", "Income", "Kidhome", "Teenhome", "Recency", "MntWines", "MntFruits", "MntMeatProducts", "MntFishProducts", "MntSweetProducts", "MntGoldProds", "NumDealsPurchases", "NumWebPurchases", "NumCatalogPurchases", "NumStorePurchases", "NumWebVisitsMonth")
+
+# Select only the numerical variables and convert the data to a long format
+Customer_numerical <- Customer_clean[, numerical_vars]
+Customer_long <- gather(Customer_numerical, key = "Variable", value = "Value")
+
+# Create the boxplot with all variables using facet_wrap
+boxplot_outlier <- 
+  ggplot(Customer_long, aes(x = factor(1), y = Value)) +
+  geom_boxplot(outlier.color = "red", outlier.size = 0.5, fill = "light blue") +
+  facet_wrap(~Variable, scales = "free", ncol = 4) +
+  labs(x = "", y = "Value", title = "Boxplots for numerical variables") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), strip.background = element_blank()) +
+  guides(fill = none)
+
+# From the graph, most of the outliers seen like natural outliers came from the population
+# Income outlier affects too much, keep working on Income less than 200,000
+# Mistake values in Year_Birth, remove observations with Year_Birth before 1920
+Customer_clean <- subset(Customer_clean, Income < 200000 & Year_Birth > 1920)
+
+# Convert categorical variables to factors
+Customer_clean$Education <- as.factor(Customer_clean$Education)
+Customer_clean$Marital_Status <- as.factor(Customer_clean$Marital_Status)
+
+# Create the new binary variable "Marital"
+Customer_clean <- Customer_clean %>%
+  mutate(Marital = ifelse(Marital_Status %in% c("Together", "Married"), "In Couple", "Single"))
+
+# Convert the new variable "Marital" to a factor
+Customer_clean$Marital <- as.factor(Customer_clean$Marital)
+
+# Reorder the levels of the Education variable
+Customer_clean$Education <- factor(Customer_clean$Education, levels = c("Basic", "2n Cycle", "Graduation", "Master", "PhD"), ordered = TRUE)
+
+# Introduce helpful variables and standardize variable name
+Customer_clean <- Customer_clean %>% 
+  mutate(TotalCampaignResponses = rowSums(select(., starts_with("AcceptedCmp"))) + Response) %>%
+  mutate(CampaignResponse = Response) %>%
+  mutate(Minorhome = Kidhome + Teenhome) %>% 
+  mutate(Age = 2014 - Year_Birth) %>%
+  mutate(AgeGroup = cut(Age, breaks = c(0, 25, 35, 45, 55, 65, Inf), labels = c("Under 25", "25-34", "35-44", "45-54", "55-64", "65+"))) %>%
+  mutate(IncomeCategory = cut(Income, breaks = c(0,50000,100000,Inf), labels = c("Under 50k", "50k-100k", "Above 100k"), include.lowest = TRUE)) %>%
+  mutate(TotalAmountSpent = MntFishProducts + MntMeatProducts + MntFruits + MntSweetProducts + MntWines + MntGoldProds) %>%
+  mutate(WebPurchaseRatio = NumWebPurchases / (NumCatalogPurchases + NumStorePurchases + NumWebPurchases))
+
+# Convert categorical variables to factors
+Customer_clean$Education <- as.factor(Customer_clean$Education)
+Customer_clean$Marital<-as.factor(Customer_clean$Marital)
+Customer_clean$IncomeCategory<-as.factor(Customer_clean$IncomeCategory)
+Customer_clean$AgeGroup<-as.factor(Customer_clean$AgeGroup)
+Customer_clean$Minor<-as.factor(Customer_clean$Minor)
+
+# Generate table
+Customer_table <- Customer_clean %>%
+  select("AgeGroup", "Education", "Marital", "Income", "Minorhome", "MntWines", "MntFruits", "MntMeatProducts", "MntFishProducts", "MntSweetProducts", "MntGoldProds", "NumDealsPurchases",  "NumWebPurchases", "NumCatalogPurchases", "NumStorePurchases", "CampaignResponse")
+
+Customer_table_html <- Customer_table[1:5, ] %>%
+  kable("html", caption = "Summary of Marketing Campaign Data", align = "c") %>%
+  kable_styling(bootstrap_options = c("striped", "condensed", "responsive"), full_width = F) %>%
+  column_spec(1, bold = T, border_right = T) %>%
+  row_spec(0, bold = T, background = "lightblue") %>%
+  scroll_box(width = "100%", height = "300px")
+```
+
+The dataset used in our analysis was obtained from Kaggle, originally provided by Dr. Omar Romero-Hernandez. It consists of customer features and purchase behaviors collected by a marketing company. The dataset contains a total of 2,240 observations, where each observation represents an individual customer of the company. This dataset serves as a sample of the company's entire customer base. In order to answer our research questions, we have carefully selected specific variables from the original dataset and created new variables by transforming the original ones for better usability and convenience.
+
+In this dataset, the preliminary variables of interest include basic demographic information about the customers: *Year_Birth*, which represents the customer's birth year; *Education*, indicating the customer's education level; *Marital_Status*, reflecting the customer's marital status; *Income*, showing the customer's yearly household income; *Kidhome*, representing the number of children in the customer's household; and *Teenhome*, indicating the number of teenagers in the customer's household. In addition to these demographic variables, we also included some variables related to the customers' spending on various product categories and the number of purchases made through different shopping methods: *MntWines*, the amount spent on wine in the last two years; *MntFruits*, the amount spent on fruits in the last two years; *MntMeatProducts*, the amount spent on meat in the last two years; *MntFishProducts*, the amount spent on fish in the last two years; *MntSweetProducts*, the amount spent on sweets in the last two years; *MntGoldProds*, the amount spent on gold in the last two years; *NumWebPurchases*, the number of purchases made through the company's website; *NumCatalogPurchases*, the number of purchases made using a catalog; and *NumStorePurchases*, the number of purchases made directly in stores.
+
+In our analysis, the first step was to clean the data. After removing a small number of missing values, we aimed to identify any unreasonable outliers that might significantly impact the overall distribution of the numerical variables. To detect outliers, we chose to use boxplots for each numerical variable. Upon inspecting these graphs, we discovered that the highest income in the *Income* variable was more than three times the income of the second-highest earner. Although studying customers with various income levels is essential, this particular high-income customer represents an extreme case among the observations. As a result, this customer's purchasing habits might disproportionately influence our model, so we decided to treat this observation as an outlier and remove it from the analysis.
+
+In addition, we noticed that two customers in the *Year_Birth* variable were recorded as being born before 1900. It is unlikely that currently active customers were born before 1900, leading us to believe these records were mistakenly recorded. Consequently, we decided to remove these two observations from our dataset. The remaining outliers seem to be natural outliers originating from the population, and we have decided to keep them in our analysis.
+
+```{r echo = TRUE}
+boxplot_outlier
+```
+
+In order to make the variables more suitable for our research and facilitate the visualization of our analysis results, we created several new variables using the existing ones. Firstly, the original data had a messy record of marital statuses, with eight different values. To simplify the marital status for predicting customer purchase behavior, we classified these eight values into two categories: "In Couple" and "Single", and named this new variable *Marital*. Furthermore, the original data recorded the number of children and teenagers in the customer's home separately. In our prior Exploratory Data Analysis, we found that *Kidhome* and *Teenhome* had almost the same impact on customer purchase behavior. Therefore, we introduced a new variable *Minorhome* to represent the number of minors in the customer's home. Similarly, we also introduced *CampaignResponse*, which indicates whether a customer has participated in any campaign at all, with 1 for participation and 0 for non-participation. In addition, we divided the customers' ages into groups with intervals of 10 years and created a new variable called *AgeGroup*, and we also categorized customers' income into three groups: "Under 50k", "50k-100k", and "Above 100k" to prepare for the analysis of our second research question.
+
+In our analysis, the variables we are most interested in are related to the number of times customers use various purchasing methods and whether customers participate in the company's marketing campaigns. In the following sections, we will demonstrate how other variables influence and effectively predict the variables we are interested in. The table below includes the variables that will be used in our analysis, with each row representing a customer's demographic information and purchasing behavior.
+
+```{r echo = TRUE}
+Customer_table_html
+```
+
+
+# RESULTS
+
+```{r echo = TRUE}
+# What is the most influential product category in determining the number of purchases made through each shopping method?
+Customer_Q1 = Customer_clean
+
+# Make data for Q1, the scale of amount spend is much larger than numbers of purchases, divided by 1000 to make coefficient Visually friendly
+Customer_Q1$MntWines <- Customer_clean$MntWines / 1000
+Customer_Q1$MntFruits <- Customer_clean$MntFruits / 1000
+Customer_Q1$MntMeatProducts <- Customer_clean$MntMeatProducts / 1000
+Customer_Q1$MntFishProducts <- Customer_clean$MntFishProducts / 1000
+Customer_Q1$MntSweetProducts <- Customer_clean$MntSweetProducts / 1000
+Customer_Q1$MntGoldProds <- Customer_clean$MntGoldProds / 1000
+
+# Calculate all coefficient
+mod_webPurchases = lm(NumWebPurchases ~ MntWines + MntFruits + MntMeatProducts + MntFishProducts + MntSweetProducts + MntGoldProds, data = Customer_Q1)
+
+mod_catalogPurchases = lm(NumCatalogPurchases ~ MntWines + MntFruits + MntMeatProducts + MntFishProducts + MntSweetProducts + MntGoldProds, data = Customer_Q1)
+
+mod_storePurchases = lm(NumStorePurchases ~ MntWines + MntFruits + MntMeatProducts + MntFishProducts + MntSweetProducts + MntGoldProds, data = Customer_Q1)
+
+# Get slope from summary(mod)
+getSlopeList.fun = function(model){
+  slope_list = {}
+  for(i in 2 : 7){
+    slope = summary(model)$coef[i, 1]
+    slope_list = append(slope_list, slope)
+  }
+  return(slope_list)
+}
+
+# Get P-value from summary(mod)
+getPvalueList.fun = function(model){
+  pvalue_list = {}
+  for(i in 2 : 7){
+    pvalue = summary(model)$coef[i, 4]
+    pvalue_list = append(pvalue_list, pvalue)
+  }
+  return(pvalue_list)
+}
+
+# Check there is statistically significant evidence suggest that the slope is not zero (β ≠ 0)
+pvalue_df = data.frame(Variable = c("MntWines", "MntFruits", "MntMeatProducts", "MntFishProducts", "MntSweetProducts", "MntGoldProds"),
+                     "Website Purchases" = getPvalueList.fun(mod_webPurchases),
+                     "Catalog Purchases" = getPvalueList.fun(mod_catalogPurchases),
+                     "Store Purchases" = getPvalueList.fun(mod_storePurchases))
+
+pvalue_table <- pvalue_df %>%
+  kable("html", caption = "P-values for different product categories and purchase methods", align = "c") %>%
+  kable_styling(bootstrap_options = c("striped", "condensed", "responsive"), full_width = F) %>%
+  column_spec(1, bold = T, border_right = T) %>%
+  row_spec(0, bold = T, background = "lightblue")
+
+#Table 1: display the P-values for different product categories and purchase methods
+# pvalue_table (below the text)
+
+# Find the strongest relationship
+coef_df = data.frame(Variable = c("MntWines", "MntFruits", "MntMeatProducts", "MntFishProducts", "MntSweetProducts", "MntGoldProds"),
+                     "Website Purchases" = getSlopeList.fun(mod_webPurchases),
+                     "Catalog Purchases" = getSlopeList.fun(mod_catalogPurchases),
+                     "Store Purchases" = getSlopeList.fun(mod_storePurchases))
+
+coef_table <- coef_df %>%
+  kable("html", caption = "Coefficients for different product categories and purchase methods", align = "c") %>%
+  kable_styling(bootstrap_options = c("striped", "condensed", "responsive"), full_width = F) %>%
+  column_spec(1, bold = T, border_right = T) %>%
+  row_spec(0, bold = T, background = "lightblue")
+
+# Create a long format for coef_df
+coef_df_long <- coef_df %>%
+  gather(key = "Purchase_Type", value = "Coefficient", -Variable)
+
+# Heamap 2: coefficient heatmap
+coef_heatmap <-
+  ggplot(coef_df_long, aes(x = Purchase_Type, y = Variable, fill = Coefficient)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", midpoint = 0) +
+  theme_minimal() +
+  labs(x = "Purchase Type", y = "Product Category", title = "Coefficient Heatmap") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The first question we aim to investigate is the most influential product category in determining the number of purchases made through each shopping method. This is important because it indicates customers' preferences for using a particular shopping method to fulfill their demand for that specific product category. To explore this, we employed linear regression models to examine the relationships between product categories and the number of purchases made through various shopping methods: web, catalog, and store purchases. Initially, we established several linear models for different purchase methods in relation to the amount spent on various products. Our primary interest lies in the coefficients associated with each variable, as a larger coefficient signifies a more significant impact of a product's purchase quantity on a specific purchase method. However, we realized that the scale of the amount spent on each product is much larger than the scale of the number of times a particular purchase method is used. This is reasonable because each shopping instance incurs some expenses, resulting in a total amount considerably higher than the number of shopping instances. Consequently, the slopes we obtained are overall very small. To enhance visualization, we divided all expenses by 1000. This does not fundamentally affect the essential coefficients we obtain from the models, such as the p-value and the slope coefficient. By rescaling the data, we can better interpret the relationships between product categories and purchase methods, ultimately identifying the most influential product category for each shopping method.
+
+First, we conducted hypothesis tests for each linear model. In order to determine whether a customer's expenditure on a specific product strongly influences their choice of one of the shopping methods, we need to establish that a relationship exists between the two variables, meaning their slope is not equal to zero. The p-values obtained from these hypothesis tests are presented in the table below. By performing these tests, we found that the p-values for most models were far below 0.05. Consequently, we can suggest that within a 95% confidence interval, there is statistically significant evidence that these slopes are not zero, indicating that a customer's expenditure on a particular product indeed has an impact on their choice of shopping method. However, for the following combinations: fruit with website purchases and catalog purchases, meat with store purchases, and fish with website purchases, the p-values were greater than the significance level. As a result, we will disregard these combinations when comparing slopes in subsequent analyses.
+
+```{r echo = TRUE}
+pvalue_table
+```
+
+Even though some slopes are negative, indicating that the independent variable can negatively influence the response variable, we do not compare the absolute values of the coefficients. This is because we want to find the product category with the most significant positive impact on a particular shopping method, enabling the company to increase profits by allocating more of this type of product to that shopping method. Using the collected data, we created the heatmap below. A deeper red color indicates a larger slope coefficient, while colors closer to white and blue represent smaller slopes. By observing the heatmap, we can see that the amount spent on gold products has the most significant impact on catalog purchases, the amount spent on fruit and sweet products has the most significant impact on store purchases, and the amount spent on gold and sweet products has the most significant impact on website purchases. Among these coefficients, the largest is the number of website purchases with the amount spent on gold products, and the smallest is website purchases with meat products, which is even negative, indicating that customers who spend more on purchasing meat products may be less likely to use website purchases. This information can help marketing companies effectively allocate products to different shopping channels to increase sales and reduce costs.
+
+```{r echo = TRUE}
+coef_heatmap
+```
+
+```{r echo = TRUE, warning = FALSE}
+# Q2 code
+
+response_education <- Customer_clean %>%
+  group_by(Education) %>%
+  summarise(
+    N = n(),
+    Response_rate = sum(Response)/n()
+  )
+
+educationGraph1 <- ggplot(response_education, aes(x = Education, y = Response_rate)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  ggtitle("Response Rate by Education Level") +
+  xlab("Education Level") +
+  ylab("Response Rate") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 10, face = "bold"),
+        axis.title.x = element_text(size = 8, face = "bold"),
+        axis.title.y = element_text(size = 8, face = "bold"))
+
+response_marital <- Customer_clean %>%
+  group_by(Marital) %>%
+  summarise(
+    N = n(),
+    Response_rate = sum(Response) / n()
+  )
+
+maritalGraph1 <- ggplot(response_marital, aes(x = Marital, y = Response_rate)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Response Rate by Marital Status", x = "Marital Status", y = "Response Rate") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 10, face = "bold"),
+        axis.title.x = element_text(size = 8, face = "bold"),
+        axis.title.y = element_text(size = 8, face = "bold"))
+
+response_age <- Customer_clean %>%
+  group_by(AgeGroup) %>%
+  summarise(
+    N = n(),
+    Response_rate = sum(Response) / n()
+  )
+
+ageGraph1 <- ggplot(response_age, aes(x = AgeGroup, y = Response_rate)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Response Rate by Age", x = "Age", y = "Response Rate") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 10, face = "bold"),
+        axis.title.x = element_text(size = 8, face = "bold"),
+        axis.title.y = element_text(size = 8, face = "bold"))
+
+response_income <- Customer_clean %>%
+  group_by(IncomeCategory) %>%
+  summarise(
+    N = n(),
+    Response_rate = sum(Response) / n()
+  )
+
+incomeGraph1 <- ggplot(response_income, aes(x = IncomeCategory, y = Response_rate)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Response Rate by Income Category", x = "Income Category", y = "Response Rate") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 10, face = "bold"),
+        axis.title.x = element_text(size = 8, face = "bold"),
+        axis.title.y = element_text(size = 8, face = "bold"))
+
+response_Minor <- Customer_clean %>%
+  group_by(Minor) %>%
+  summarise(
+    N = n(),
+    Response_rate = sum(Response) / n()
+  )
+
+minorGraph1 <- ggplot(response_Minor, aes(x = Minor, y = Response_rate)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Response Rate by Minor", x = "Minor", y = "Response Rate") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 10, face = "bold"),
+        axis.title.x = element_text(size = 8, face = "bold"),
+        axis.title.y = element_text(size = 8, face = "bold"))
+
+# Displayed in text
+# combined_plot1 <- grid.arrange(educationGraph1, maritalGraph1, ageGraph1,
+#.                              incomeGraph1, minorGraph1, ncol = 2, nrow = 3,
+#                               top = textGrob("Title for the Combined Plot",
+#                                              gp = gpar(fontsize = 14, fontface = "bold")))
+
+#Data for Q2
+demo_data = Customer_clean[c("Education", "Marital", "IncomeCategory", "Minor","AgeGroup", "Response")]
+
+# Model
+
+#Create a partition to split the data
+set.seed(123)
+train_index <- createDataPartition(demo_data$Response, p = 0.8, list = FALSE)
+train_set <- demo_data[train_index, ]
+test_set <- demo_data[-train_index, ]
+
+#Fit the logistic regression model
+logistic_model <- glm(Response ~ Education + Marital + IncomeCategory + AgeGroup+ Minor, data = train_set, family = "binomial")
+
+# summary(logistic_model)
+#Predict the response probabilities for the test set
+logistic_pred_probs <- predict(logistic_model, newdata = test_set, type = "response")
+
+# Convert predicted probabilities to binary class predictions
+threshold <- 0.5
+logistic_pred_class <- ifelse(logistic_pred_probs > threshold, 1, 0)
+
+# Create a confusion matrix
+conf_matrix <- table(Predicted = logistic_pred_class, Actual = test_set$Response)
+#print(conf_matrix)
+
+# Calculate evaluation metrics
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+precision <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+recall <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+#cat("Accuracy:", accuracy, "\n")
+#cat("Precision:", precision, "\n")
+#cat("Recall:", recall, "\n")
+#cat("F1-score:", f1_score, "\n")
+
+# Calculate AUC
+roc_obj <- suppressMessages(roc(test_set$Response, logistic_pred_probs))
+auc_val <- auc(roc_obj)
+#cat("AUC:", auc_val, "\n")
+
+var_imp = varImp(logistic_model)
+sorted_var_imp <- var_imp[order(-var_imp$Overall),]
+#print(sorted_var_imp)
+
+#Graphs
+# Data frame for Education
+education_grid <- data.frame(Education = levels(train_set$Education))
+education_pdp <- as.data.frame(partial(logistic_model, pred.var = "Education", pred.grid = education_grid, plot = FALSE))
+
+# Data frame for Minor
+Minor_grid <- data.frame(Minor = levels(train_set$Minor))
+Minor_pdp <- as.data.frame(partial(logistic_model, pred.var = "Minor", pred.grid = Minor_grid, plot = FALSE))
+
+# Convert log-odds to probabilities for Education
+education_pdp$yhat_prob <- exp(education_pdp$yhat) / (1 + exp(education_pdp$yhat))
+
+# Convert log-odds to probabilities for Minor
+Minor_pdp$yhat_prob <- exp(Minor_pdp$yhat) / (1 + exp(Minor_pdp$yhat))
+
+
+# Bar plot for Education
+educationGraph2 <- ggplot(education_pdp, aes(x = factor(Education), y = yhat_prob)) +
+  geom_bar(stat = "identity", width = 0.7, fill = "skyblue") +
+  labs(title = "Partial Dependence Plot: Education",
+       x = "Education Level",
+       y = "Predicted Probability") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 10, face = "bold"),
+        axis.title.x = element_text(size = 8, face = "bold"),
+        axis.title.y = element_text(size = 8, face = "bold"))
+
+# Bar plot for Minor
+minorGraph2 <- ggplot(Minor_pdp, aes(x = factor(Minor), y = yhat_prob)) +
+  geom_bar(stat = "identity", width = 0.7, fill = "skyblue") +
+  labs(title = "Partial Dependence Plot: Minor",
+       x = "Minor",
+       y = "Predicted Probability") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 10, face = "bold"),
+        axis.title.x = element_text(size = 8, face = "bold"),
+        axis.title.y = element_text(size = 8, face = "bold"))
+
+# Data frame for IncomeCategory
+incomecategory_grid <- data.frame(IncomeCategory = levels(train_set$IncomeCategory))
+incomecategory_pdp <- as.data.frame(partial(logistic_model, pred.var = "IncomeCategory", pred.grid = incomecategory_grid, plot = FALSE))
+
+# Convert log-odds to probabilities for IncomeCategory
+incomecategory_pdp$yhat_prob <- exp(incomecategory_pdp$yhat) / (1 + exp(incomecategory_pdp$yhat))
+
+# Bar plot for IncomeCategory
+incomeGraph2 <- ggplot(incomecategory_pdp, aes(x = factor(IncomeCategory), y = yhat_prob)) +
+  geom_bar(stat = "identity", width = 0.7, fill = "skyblue") +
+  labs(title = "Partial Dependence Plot: Income Category",
+       x = "Income Category",
+       y = "Predicted Probability") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 10, face = "bold"),
+        axis.title.x = element_text(size = 8, face = "bold"),
+        axis.title.y = element_text(size = 8, face = "bold"))
+
+# Data frame for Marital
+marital_grid <- data.frame(Marital = levels(train_set$Marital))
+marital_pdp <- as.data.frame(partial(logistic_model, pred.var = "Marital", pred.grid = marital_grid, plot = FALSE))
+
+# Convert log-odds to probabilities for Marital
+marital_pdp$yhat_prob <- exp(marital_pdp$yhat) / (1 + exp(marital_pdp$yhat))
+
+# Bar plot for Marital
+maritalGraph2 <- ggplot(marital_pdp, aes(x = factor(Marital), y = yhat_prob)) +
+  geom_bar(stat = "identity", width = 0.7, fill = "skyblue") +
+  labs(title = "Partial Dependence Plot: Marital",
+       x = "Marital Status",
+       y = "Predicted Probability") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 10, face = "bold"),
+        axis.title.x = element_text(size = 8, face = "bold"),
+        axis.title.y = element_text(size = 8, face = "bold"))
+
+# Data frame for AgeGroup
+agegroup_grid <- data.frame(AgeGroup = levels(train_set$AgeGroup))
+agegroup_pdp <- as.data.frame(partial(logistic_model, pred.var = "AgeGroup", pred.grid = agegroup_grid, plot = FALSE))
+
+# Convert log-odds to probabilities for AgeGroup
+agegroup_pdp$yhat_prob <- exp(agegroup_pdp$yhat) / (1 + exp(agegroup_pdp$yhat))
+
+# Bar plot for AgeGroup
+ageGraph2 <- ggplot(agegroup_pdp, aes(x = factor(AgeGroup), y = yhat_prob)) +
+  geom_bar(stat = "identity", width = 0.7, fill = "skyblue") +
+  labs(title = "Partial Dependence Plot: Age Group",
+       x = "Age Group",
+       y = "Predicted Probability") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 10, face = "bold"),
+        axis.title.x = element_text(size = 8, face = "bold"),
+        axis.title.y = element_text(size = 8, face = "bold"))
+
+# Displayed in text
+# Show combined predicted graph
+# combined_plot2 <- grid.arrange(educationGraph2, maritalGraph2, ageGraph2,
+#                               incomeGraph2, minorGraph2, ncol = 2, nrow = 3,
+#                               top = textGrob("Title for the Combined Plot",
+#                                              gp = gpar(fontsize = 14, fontface = "bold")))
+
+# Extract the coefficients from the logistic_model
+coef_table <- data.frame(Estimate = coef(logistic_model))
+
+# Calculate the probabilities from the log-odds
+coef_table$Probability <- exp(coef_table$Estimate) / (1 + exp(coef_table$Estimate))
+
+# Add the variable names as a new column
+coef_table$Variable <- rownames(coef_table)
+
+# Rearrange the columns
+coef_table <- coef_table[, c("Variable", "Estimate", "Probability")]
+
+# Display the table
+# coef_table
+```
+
+Our second question is what demographic factors are most strongly associated with a customer's likelihood to respond to the company's marketing campaign. To answer this question, we first explored the relationships between demographic variables and campaign response rates using visualization. By plotting response rates within different feature groups in the bar graph, we found that single customers with higher education levels, more income, and fewer minors at home are more likely to respond. Additionally, age is not a linear factor in response rate since the bar graph shows a curve trend.
+
+```{r echo = TRUE}
+combined_plot1 <- grid.arrange(educationGraph1, maritalGraph1, ageGraph1,
+                              incomeGraph1, minorGraph1, ncol = 2, nrow = 3,
+                              top = textGrob("Response Rate by Different Features",
+                                             gp = gpar(fontsize = 14, fontface = "bold")))
+```
+
+To quantify these relationships, we used logistic regression to model the probability of campaign response as a function of several demographic variables, including age, income, education, number of minors and marital status. The logistic regression model produced statistically significant coefficients for marital status, age group, and number of minors. The coefficients for some education level indicators, such as 2n Cycle, were also significant, suggesting that these variables may be useful in predicting response to the campaign. The variable importance analysis also showed that the customer's education level, marital status, age group, and household size were significant predictors of customer response. Additionally, we visualize the predicted response value via the partial dependence plots below. The results suggest that single customers with fewer minors or higher education levels are more likely to respond to the campaign. This may be because single customers or customers with fewer minors may have more disposable income or more time to consider the offer and respond to the campaign. Customers with higher education levels may be more analytical and better understand the offer's reward. The response rate is a quadratic function of age, implying that people in the middle of the age population are the least likely to respond. One possible explanation is that customers in the middle of the age population may be in a transitional phase of their lives, with more demands on their time and attention from both work and family responsibilities. This may make them less likely to respond to marketing messages, as they have less disposable income or less time to engage with marketing campaigns. At the same time, younger customers may be more likely to respond to marketing campaigns because they are more technologically savvy and are more likely to be active online. However, unlike what is shown in the relationship graph of raw data, the customer's income category was not a significant predictor. This might be caused by collinearity: Income may be highly correlated with other variables in our model, such as age or education, which could mask its effect on campaign response. In other words, income may be a significant predictor of response in a simple model, but other variables may absorb its effect in a more complex model.
+
+```{r echo = TRUE}
+combined_plot2 <- grid.arrange(educationGraph2, maritalGraph2, ageGraph2,
+                              incomeGraph2, minorGraph2, ncol = 2, nrow = 3,
+                              top = textGrob("Partial Dependence Plot for Demographic Variables",
+                                             gp = gpar(fontsize = 14, fontface = "bold")))
+```
+
+We evaluated the model using a confusion matrix and calculated several evaluation metrics such as accuracy, precision, recall, and F1-score. The model achieved an accuracy of 85.5%, meaning it correctly predicted the response/non-response status of 85.5% of the customers in the testing set. The precision of the model was 100%, indicating that when the model predicted a customer would respond to the campaign, it was always correct. However, the recall was low at 4.5%, implying that the model missed a significant number of customers who would have responded to the campaign. The F1-score was also relatively low at 8.6%, which reflects a trade-off between precision and recall. Overall, the evaluation statistics imply that our model is doing a great job predicting customer response to the campaign, but there is still space for improvement.
+
+
+# CONCLUSION
+
+In conclusion, our investigation into the first research question has provided valuable insights into the most influential product categories that determine customers' choice of shopping methods. We discovered that expenditures on gold products primarily influence catalog purchases, while store purchases are driven by spending on fruit and sweet products, and website purchases are impacted by spending on gold and sweet products. These findings offer marketing companies a roadmap for strategic product allocation across different shopping channels to enhance sales and reduce costs, enabling them to capitalize on the most influential product categories driving customer preferences for each shopping method. By focusing on promoting gold products for catalog purchases, fruit and sweet products for store purchases, and gold and sweet products for website purchases, businesses can tailor their marketing strategies to better align with customer preferences, ultimately leading to higher revenue, increased customer satisfaction, and more efficient use of resources. However, there is still room for improvement in the current model. As the range of product categories available for shopping is vast, it may not be feasible to directly identify the product category with the largest coefficient if we acquire more data in the future. We cannot be certain that all these variables would effectively predict customers' shopping method preferences, and we cannot assume that there is no interaction between these variables. Therefore, when faced with a larger dataset, future research should first employ appropriate multiple predictor selection methods to identify the most effective predictors for customers' shopping methods. Subsequently, businesses can use these refined predictors to determine how to allocate products optimally, ultimately leading to increased profits and a more targeted marketing strategy.
+
+In our analysis of the second question, we identified several strong predictors of campaign response, including education level, marital status, and the number of minors at home. Surprisingly, income level was not a significant predictor, despite its relationship with response in the raw data. These findings have important implications for marketing campaigns aiming to maximize effectiveness and return on investment (ROI), as companies can tailor their messaging and offers to specific demographic groups based on these variables, increasing the likelihood of response. Our analysis also underscored the importance of using rigorous modeling techniques like logistic regression to account for potential confounding variables and collinearity, which can lead to misleading conclusions about the relationships between variables. While income was not a significant predictor of campaign response in our model, it is still an important variable to consider in marketing campaigns, as it may impact consumer behavior and preferences. Moving forward, there are several areas where our modeling could be improved. One potential way to enhance the model is by exploring interactions between different predictors, such as age group and the number of minors, or marital status and minors. Additionally, treating income and age as continuous variables may capture a more nuanced relationship between these predictors and the response variable. We also noticed that the age group variable showed a quadratic trend in the raw data, where the response rate was lowest in the middle age groups. This suggests that adding a quadratic term for the Age variable in the model may improve its performance. Furthermore, exploring more complex modeling techniques like neural networks or decision trees could better capture the non-linear relationships between predictor variables and campaign response.
+
+Finally, other data sources, such as social media or retailer website analytics, could be integrated with our existing data to provide a more comprehensive understanding of customer behavior and preferences. Access to more extensive and diverse datasets, including data from different industries or geographical regions, could also contribute to a more robust analysis and broader applicability of our findings.

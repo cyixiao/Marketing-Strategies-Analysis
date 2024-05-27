@@ -1,0 +1,219 @@
+---
+title: "Exploratory Data Analysis"
+author: "STOR 320.01 Group 13"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(corrplot)
+
+# Import Data Below
+Customer <- read.csv("marketing_campaign.csv", sep = "\t")
+head(Customer)
+```
+
+# Creator: Tianjun Ma
+
+### Q1: Does online purchase behavior have to do with education level?
+
+```{r}
+mod1 = lm(NumWebPurchases ~ Education, data = Customer)
+summary(mod1)
+DataForQ1 <- Customer
+education.fun = function(education){
+  for(i in 1:length(education)){
+    if(education[i] == "2n Cycle"){
+      education[i] = 1
+    } else if(education[i] == "Basic"){
+      education[i] = 2
+    } else if(education[i] == "Graduation"){
+      education[i] = 3
+    } else if(education[i] == "Master"){
+      education[i] = 4
+    } else if(education[i] == "PhD"){
+      education[i] = 5
+    }
+  }
+  return(education)
+}
+DataForQ1$EducationLevel = education.fun(DataForQ1$Education)
+DataForQ1 <- DataForQ1 %>%
+  mutate_at(c("EducationLevel"), as.numeric)
+
+ggplot(DataForQ1, mapping = aes(x = jitter(EducationLevel, amount = 0.1), y = jitter(NumWebPurchases, amount = 0.1))) +
+  geom_point(size = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Education Level", y = "Number of Purchases Through Website") +
+  scale_x_continuous(breaks = c(1, 2, 3, 4, 5), labels = c("2n Cycle", "Basic", "Graduation", "Master", "PhD"))
+
+```
+
+### Q2: Is there a relationship between the number of children and the amount spent on sweet product?
+
+```{r}
+mod2 = lm(MntSweetProducts ~ Kidhome, data = Customer)
+summary(mod2)
+
+ggplot(data = Customer, aes(x = factor(Kidhome), y = MntSweetProducts)) +
+  geom_boxplot() + 
+  stat_summary(fun = mean, geom = "line", aes(group = 1))+
+  labs(x = "Number of Children in Household", y = "Amount Spent on Sweet Products")
+
+```
+
+# Interpreter: Arul Gundam
+
+### Q1: Is the amount a customer spends on fruit related to the number of children in the customer's household?
+
+```{r}
+mod3 = lm(MntFruits ~ Kidhome, data = Customer)
+summary(mod3)
+
+ggplot(data = Customer, aes(x = factor(Kidhome), y = MntFruits)) +
+  geom_boxplot() + 
+  stat_summary(fun = mean, geom = "line", aes(group = 1)) +
+  labs(x = "Number of Children in Household", y = "Amount Spent on Fruits")
+```
+
+### Q2: Is there a relationship between the customer's yearly household income and the amount spent on gold products?
+
+```{r}
+mod4 = lm(MntGoldProds ~ Income, data = Customer)
+summary(mod4)
+
+# one outlier has been removed
+ggplot(filter(Customer, Income < 200000), mapping = aes(x = Income, y = MntGoldProds)) +
+  geom_point(size = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Income", y = "Amount Spent on Gold Products")
+```
+
+# Orator1: Diego Pardo
+
+### Q1: Is there a relationship between the number of children in a household and the amount spent on wine?
+
+```{r}
+mod5 = lm(MntWines ~ Kidhome, data = Customer)
+summary(mod5)
+
+ggplot(data = Customer, aes(x = factor(Kidhome), y = MntWines)) +
+  geom_boxplot() + 
+  stat_summary(fun = mean, geom = "line", aes(group = 1))+
+  labs(x = "Number of Children in Household", y = "Amount Spent on Wines")
+```
+
+### Q2: Is there a relationship between the number of teenagers in a household and the amount spent on meat products?
+
+```{r}
+mod6 = lm(MntMeatProducts ~ Teenhome, data = Customer)
+summary(mod6)
+ggplot(data = Customer, aes(x = factor(Teenhome), y = MntMeatProducts)) +
+  geom_boxplot() + 
+  stat_summary(fun = mean, geom = "line", aes(group = 1)) +
+  labs(x = "Number of Teenagers in Household", y = "Amount Spent on Meat Products")
+```
+
+# Orator 2: Ashley Zhang
+
+### Q1: From what level of education are customers typically more likely to file a complaint?
+
+```{r}
+complaints_by_education <- Customer %>%
+  group_by(Education) %>%
+  summarize(complaint_rate = mean(Complain == 1) * 100)
+
+ggplot(complaints_by_education, aes(x = Education, y = complaint_rate)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "Complaint Rate by Education Level",
+       x = "Education Level",
+       y = "Complaint Rate (%)")
+```
+
+### Q2: Is there a correlation between the number of children in the home and the number of online purchases?
+
+```{r}
+mod8 = lm(NumWebPurchases ~ Kidhome, data = Customer)
+summary(mod8)
+ggplot(data = Customer, aes(x = factor(Kidhome), y = NumWebPurchases)) +
+  geom_boxplot() + 
+  stat_summary(fun = mean, geom = "line", aes(group = 1)) +
+  labs(x = "Number of Children in Household", y = "Number of Purchases Through Website")
+```
+
+# Deliverer: Yixiao Chen
+
+### Q1: Is there a relationship between the customer’s age and the amount they spend on wine?
+
+```{r}
+# only considered birth after 1900
+mod9 = lm(MntWines ~ Year_Birth, data = filter(Customer, Year_Birth > 1900))
+summary(mod9)
+ggplot(filter(Customer, Year_Birth > 1900), mapping = aes(x = Year_Birth, y = MntWines)) +
+  geom_point(size = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Customer's Birth Year", y = "Amount Spent on Wines")
+```
+
+### Q2: Does buying a certain product correlate to buying another specific product?
+
+```{r}
+product_cor = cor(Customer[, c("MntWines", "MntFruits", "MntMeatProducts", "MntFishProducts", "MntSweetProducts", "MntGoldProds")])
+product_cor_df <- as.data.frame(product_cor)
+product_cor_df
+corrplot(Customer, method = "color")
+```
+
+# Follow-up Questions
+
+### New Questions Based Off Initial Investigation
+
+- Q1: What is the product category that shows the highest correlation with the number of children in household in terms of purchase behavior?
+- Q2: What is the product category that shows the highest correlation with income in terms of purchase behavior?
+- Q3: What is the difference in the influence of the number of teenagers and the number of children on people's purchasing behavior?
+- Q4: What variables related to household features should we use to predict the purchasing behavior of a household?
+
+### Investigation of Follow-up Questions
+
+Our group decided to investigate Q1 and Q2 in further detail.
+
+```{r}
+# For Q1:
+ggplot(data = Customer, aes(x = factor(Kidhome), y = MntWines)) +
+  geom_boxplot(aes(fill = "Wines")) +
+  geom_boxplot(aes(y = MntFruits, fill = "Fruits")) +
+  geom_boxplot(aes(y = MntMeatProducts, fill = "Meat")) +
+  geom_boxplot(aes(y = MntFishProducts, fill = "Fish")) +
+  geom_boxplot(aes(y = MntSweetProducts, fill = "Sweet")) +
+  geom_boxplot(aes(y = MntGoldProds, fill = "Gold")) +
+  labs(x = "Number of Children in Household", y = "Amount Spent on Products", fill = "Product Categories")
+```
+
+```{r}
+# For Q2:
+ggplot(data = filter(Customer, Income < 150000), aes(x= Income)) +
+  geom_point(aes(y = MntWines, color = "Wines"), size = 0.1) +
+  geom_smooth(aes(y = MntWines, color = "Wines"), method = "lm", se = FALSE, size = 0.5) + 
+  geom_point(aes(y = MntFruits, color = "Fruits"), size = 0.1) +
+  geom_smooth(aes(y = MntFruits, color = "Fruits"), method = "lm", se = FALSE, size = 0.5) +
+  geom_point(aes(y = MntMeatProducts, color = "Meat"), size = 0.1) +
+  geom_smooth(aes(y = MntMeatProducts, color = "Meat"), method = "lm", se = FALSE, size = 0.5) +
+  geom_point(aes(y = MntFishProducts, color = "Fish"), size = 0.1) +
+  geom_smooth(aes(y = MntFishProducts, color = "Fish"), method = "lm", se = FALSE, size = 0.5) +
+  geom_point(aes(y = MntSweetProducts, color = "Sweet"), size = 0.1) +
+  geom_smooth(aes(y = MntSweetProducts, color = "Sweet"), method = "lm", se = FALSE, size = 0.5) +
+  geom_point(aes(y = MntGoldProds, color = "Gold"), size = 0.1) +
+  geom_smooth(aes(y = MntGoldProds, color = "Gold"), method = "lm", se = FALSE, size = 0.5) +
+  labs(x = "Income", y = "Amount Spent on Products") +
+  guides(color = guide_legend(title = "Products"))
+```
+
+# Summary
+
+  Based on the initial questions, we focused on investigating the relationship between different household features and their purchase behavior for various products or shopping methods. Through hypothesis testing and plotting, we found significant differences in shopping behavior among households with different characteristics, such as education background, number of children, and income. However, we also encountered some usual problems during our investigation, including inconveniences caused by the dataset's limitations and differences between the actual data and our initial assumptions. For instance, we had to abandon the study on the impact of marital status on purchase behavior due to some unfamiliar and wrong values related to marital status in the dataset. Furthermore, the limited number of "Basic" education level samples made it difficult to analyze some studies on the relationship between education background and shopping behavior. Surprisingly, we found that households with more children spent less on sweet products, fruits, and meat products. We speculated that this might be due to an increase in expenses in other aspects, such as education and entertainment, limiting their spending on certain products. Additionally, we found that the shopping behavior differences between households with and without children were much greater than between households with one child and those with two children, leading us to focus future research on the impact of whether a household has children rather than the number of children they have. The initial questions about children and income helped us to identify the number of children and income as the direction we want to explore in future research, and we are also curious about the potential differences in the impact of teenagers and children as recorded in the dataset. Moreover, by the questions about the correlation between different products, we found that the correlation was not strong enough to warrant further investigation into the relationship between different products. Therefore, we will not focus on the correlation between different products in our future studies. Overall, our investigation provided insights into the significant impact of household characteristics on purchase behavior and identified the factors that we need to investigate further.
+
+  Based on our investigation of the previous questions, we found that the number of children in a household and income are strongly correlated with the amount spent on certain products. We are interested in further investigating which products' spending is more sensitive to these two factors, meaning that the amount of change in spending is greater as these two factors change. Furthermore, we noticed two similar variables in the dataset: the number of children in the household and the number of teenagers in the household. We are curious to know how these two variables perform differently in predicting household purchasing behavior. Combining the basic questions we have already solved and the follow-up questions we plan to discuss, we hope to find a way to predict a household's purchasing behavior based on its characteristics. This includes their spending on different products, their shopping habits, and even whether they are more likely to make complaints. This will not only allow us to have a deeper understanding of the dataset, but also provide a practical model that can be used by some sales companies to infer customer consumption habits and find potential customers. We have already solved Questions 1 and 2 by drawing graphs at this stage. In the graph for Question 1, we treated the number of children as a categorical variable because its range is only 2, and if we treat it as a continuous variable, the linear regression will have negative values. Through this boxplot, we can see that wines and meat products have the greatest variation in spending with the change in the number of children. The mean amount spent on them changes significantly when the number of children in a household changes from 0 to 1, indicating that whether a family has children has a huge impact on their spending on meat and wine. In comparison, household spending on other product categories is not as affected. In addition to the mean, the variance of the data also changes significantly when the number of children changes from 0 to 1, which may be due to the fact that households without children are more common in this dataset. For Question 2, we attempted to study the impact of household income on purchasing various products. Based on the graph, we found that the slope of wines is the steepest, followed by the slope of meat. This indicates that as household income increases, spending on wines and meat products increases the most. It should be noted that there are a few households in the original dataset with very high income, even exceeding $600,000, which makes the image not visually friendly and has a significant impact on the slope. Therefore, we removed these points as outliers.
+
+

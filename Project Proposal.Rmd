@@ -1,0 +1,209 @@
+---
+title: "Project Proposal"
+author: "STOR 320.01 Group 13"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readr)
+library(corrplot)
+```
+
+# Project Roles
+
+- **Creator:** Tianjun Ma
+- **Interpreter:** Arul Gundam
+- **Orator 1:** Diego Pardo
+- **Orator 2:** Ashley Zhang
+- **Deliverer:** Yixiao Chen
+
+# Dataset
+
+[Customer Personality Analysis](https://www.kaggle.com/datasets/imakash3011/customer-personality-analysis)
+```{r}
+Customer <- read.csv("marketing_campaign.csv", sep = "\t")
+head(Customer)
+Customer
+```
+
+# Initial Questions
+
+- **Question 1:** Does online purchase behavior have to do with education level?
+```{r}
+mod1 = lm(NumWebPurchases ~ Education, data = Customer)
+summary(mod1)
+plot(jitter(NumWebPurchases, amount = 0.1) ~ factor(Education), data = Customer)
+abline(mod1)
+```
+
+- **Question 2:** Is there a relationship between the number of children and the amount spent on sweet product?
+
+```{r}
+mod2 = lm(MntSweetProducts ~ Kidhome, data = Customer)
+summary(mod2)
+ggplot(Customer, mapping = aes(x = Kidhome, y = MntSweetProducts)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+
+- **Question 3:** Is the amount a customer spends on fruit related to the number of children in the customer's household?
+
+```{r}
+mod3 = lm(MntFruits ~ Kidhome, data = Customer)
+summary(mod3)
+ggplot(Customer, mapping = aes(x = Kidhome, y = MntFruits)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+
+- **Question 4:** Is there a relationship between the customer's yearly household income and the amount spent on gold products?
+
+```{r}
+mod4 = lm(MntGoldProds ~ Income, data = Customer)
+summary(mod4)
+# one outlier has been removed
+ggplot(filter(Customer, Income < 200000), mapping = aes(x = Income, y = MntGoldProds)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+- **Question 5:** Is there a relationship between the number of children in a household and the amount spent on wine?
+
+```{r}
+mod5 = lm(MntWines ~ Kidhome, data = Customer)
+summary(mod5)
+ggplot(Customer, mapping = aes(x = Kidhome, y = MntWines)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+
+- **Question 6:** How does marital status affect the number of store purchases made? 
+
+```{r}
+mod6 = lm(NumStorePurchases ~ Marital_Status, data = Customer)
+summary(mod6)
+anova(mod6)
+
+ggplot(Customer, mapping = aes(x = Marital_Status, y = NumStorePurchases)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE)
+
+plot(jitter(NumStorePurchases, amount = 0.1) ~ factor(Marital_Status), data = Customer)
+abline(mod1)
+```
+
+- **Question 7:** From what level of education are customers typically more likely to file a complaint?
+
+```{r}
+
+```
+
+- **Question 8:** Is there a correlation between the number of children in the home and the number of online purchases?
+
+```{r}
+mod8 = lm(NumWebPurchases ~ Kidhome, data = Customer)
+summary(mod8)
+ggplot(Customer, mapping = aes(x = Kidhome, y = jitter(NumWebPurchases, amount = 0.3))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+
+- **Question 9:** Is there a relationship between the customer’s age and the amount they spend on wine?
+
+```{r}
+# only considered birth after 1900
+mod9 = lm(MntWines ~ Year_Birth, data = filter(Customer, Year_Birth > 1900))
+summary(mod9)
+ggplot(filter(Customer, Year_Birth > 1900), mapping = aes(x = Year_Birth, y = MntWines)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+- **Question 10:** Does buying a certain product correlate to buying another specific product?
+
+```{r}
+product_cor = cor(Customer[, c("MntWines", "MntFruits", "MntMeatProducts", "MntFishProducts", "MntSweetProducts", "MntGoldProds")])
+product_cor_df <- as.data.frame(product_cor)
+product_cor_df
+corrplot(product_cor, method = "color")
+```
+
+
+
+
+
+```{r}
+ggplot(Customer, mapping = aes(y = MntMeatProducts)) +
+  geom_point(aes(x = jitter(Teenhome, amount = 0.1)), size = 0.5) +
+  geom_smooth(aes(x = jitter(Teenhome, amount = 0.1)), method = "lm", se = FALSE) +
+  geom_point(aes(x = jitter(Kidhome, amount = 0.1)), size = 0.5) +
+  geom_smooth(aes(x = jitter(Kidhome, amount = 0.1)), method = "lm", se = FALSE)
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+library(ggplot2)
+library(ggpubr)
+
+ggplot(data = Customer, aes(x = factor(Kidhome))) +
+  geom_boxplot(aes(y = MntWines, color = "Wines"), size = 0.5) +
+  geom_boxplot(aes(y = MntFruits, color = "Fruits"), size = 0.5) +
+  geom_boxplot(aes(y = MntMeatProducts, color = "Meat"), size = 0.5) +
+  geom_boxplot(aes(y = MntFishProducts, color = "Fish"), size = 0.5) +
+  geom_boxplot(aes(y = MntSweetProducts, color = "Sweet"), size = 0.5) +
+  geom_boxplot(aes(y = MntGoldProds, color = "Gold"), size = 0.5) +
+  labs(x = "Number of Children in Household", y = "Amount Spent on Products") +
+  guides(color = guide_legend(title = "Products")) +
+  stat_regline_equation(aes(x = factor(Kidhome), y = MntWines, color = "Wines"), label.x.npc = "right", label.y.npc = 0.15, formula = y ~ x, size = 3, label.fontsize = 14, label.sep = " ~italic(\"*p=\"~") +
+  stat_regline_equation(aes(x = factor(Kidhome), y = MntFruits, color = "Fruits"), label.x.npc = "right", label.y.npc = 0.15, formula = y ~ x, size = 3, label.fontsize = 14, label.sep = " ~italic(\"*p=\"~") +
+  stat_regline_equation(aes(x = factor(Kidhome), y = MntMeatProducts, color = "Meat"), label.x.npc = "right", label.y.npc = 0.15, formula = y ~ x, size = 3, label.fontsize = 14, label.sep = " ~italic(\"*p=\"~")+
+  stat_regline_equation(aes(x = factor(Kidhome), y = MntFishProducts, color = "Fish"), label.x.npc = "right", label.y.npc = 0.15, formula = y ~ x, size = 3, label.fontsize = 14, label.sep = " ~italic(\"*p=\"~") +
+  stat_regline_equation(aes(x = factor(Kidhome), y = MntSweetProducts, color = "Sweet"), label.x.npc = "right", label.y.npc = 0.15, formula = y ~ x, size = 3, label.fontsize = 14, label.sep = " ~italic(\"*p=\"~") +
+  stat_regline_equation(aes(x = factor(Kidhome), y = MntGoldProds, color = "Gold"), label.x.npc = "right", label.y.npc = 0.15, formula = y ~ x, size = 3, label.fontsize = 14, label.sep = " ~italic(\"*p=\"~")
+
+```
+
+
+```{r}
+ggplot(data = Customer, aes(x = factor(Kidhome), y = MntWines, fill = factor(Kidhome))) +
+  geom_boxplot() +
+  stat_poly_eq(aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")),
+               formula = y ~ x, label.x = "left", label.y = "top", parse = TRUE, size = 3) +
+  geom_smooth(aes(group = 1), method = "lm", se = FALSE, color = "black", size = 0.7) +
+  labs(x = "Number of Children in Household", y = "Amount Spent on Products") +
+  scale_fill_discrete(name = "Number of Children") +
+  theme(legend.position = "bottom")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
